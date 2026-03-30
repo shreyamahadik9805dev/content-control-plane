@@ -18,7 +18,7 @@ This Go service will **call an external HTTP API** (Apple **iTunes Search**, `me
 - **Persist** catalog + **sync run** history + **append-only audit** events in **PostgreSQL**.
 - **Read path** with a **small in-process TTL cache** and explicit **cache invalidation** on writes that affect list/detail.
 - **Curation:** at minimum **pin / unpin** with audit; **featured** reserved for follow-on UX if time allows.
-- **Operator clarity:** documented **how to run** (Docker-first) and **example requests** once the API exists.
+- **Operator clarity:** how to run the stack and example API calls are in **[docs/RUNNING.md](docs/RUNNING.md)** (Docker-first).
 - **Transparency:** **AI usage** policy and (where helpful) **tradeoffs** and **testing** story in this doc or linked notes.
 
 
