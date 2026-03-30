@@ -15,11 +15,12 @@ type Handler struct {
 	podcasts *service.Podcasts
 }
 
+// New hands the podcast service to HTTP handlers.
 func New(podcasts *service.Podcasts) *Handler {
 	return &Handler{podcasts: podcasts}
 }
 
-// Register mounts all HTTP routes on the given engine.
+// Register wires paths on r; keep new endpoints here so nothing hides in middleware.
 func (h *Handler) Register(r *gin.Engine) {
 	r.GET("/health", h.health)
 
@@ -30,10 +31,12 @@ func (h *Handler) Register(r *gin.Engine) {
 	r.GET("/audit-logs", h.auditLogs)
 }
 
+// health is the cheap liveness probe for compose and load balancers.
 func (h *Handler) health(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"status": "ok"})
 }
 
+// syncPodcasts runs an iTunes search for ?query= and upserts rows (502 if upstream blows up).
 func (h *Handler) syncPodcasts(c *gin.Context) {
 	q := c.Query("query")
 	run, err := h.podcasts.Sync(c.Request.Context(), q)
@@ -48,6 +51,7 @@ func (h *Handler) syncPodcasts(c *gin.Context) {
 	c.JSON(http.StatusAccepted, run)
 }
 
+// listPodcasts returns the catalog ordered by recency (service may serve from cache).
 func (h *Handler) listPodcasts(c *gin.Context) {
 	pods, err := h.podcasts.List(c.Request.Context())
 	if err != nil {
@@ -57,6 +61,7 @@ func (h *Handler) listPodcasts(c *gin.Context) {
 	c.JSON(http.StatusOK, pods)
 }
 
+// getPodcast fetches one row by UUID path param.
 func (h *Handler) getPodcast(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -75,6 +80,7 @@ func (h *Handler) getPodcast(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
+// pinPodcast toggles pinned and writes an audit row; body must be {"pinned": bool}.
 func (h *Handler) pinPodcast(c *gin.Context) {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
@@ -102,6 +108,7 @@ func (h *Handler) pinPodcast(c *gin.Context) {
 	c.JSON(http.StatusOK, p)
 }
 
+// auditLogs returns recent audit entries; ?limit= caps the page (handler picks a default).
 func (h *Handler) auditLogs(c *gin.Context) {
 	limit := 100
 	if q := c.Query("limit"); q != "" {

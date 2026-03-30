@@ -15,8 +15,8 @@ import (
 	"github.com/shreyafeo/content-control-plane/internal/service"
 )
 
+// main is the only composition root: env, Postgres, cache + iTunes, then Gin.
 func main() {
-	// Wire-up lives here so the rest of the tree stays easy to test in isolation.
 	cfg := config.Load()
 	if cfg.Environment == "production" {
 		gin.SetMode(gin.ReleaseMode)

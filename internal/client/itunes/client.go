@@ -20,6 +20,7 @@ type Client struct {
 	mock       bool
 }
 
+// New builds a client; empty baseURL falls back to Apple's public host, mock skips HTTP entirely.
 func New(baseURL string, mock bool) *Client {
 	u := strings.TrimRight(strings.TrimSpace(baseURL), "/")
 	if u == "" {
@@ -49,6 +50,7 @@ type searchResponse struct {
 	Results     []Show `json:"results"`
 }
 
+// SearchPodcasts hits /search?media=podcast with a few retries on flaky networks (mock path is instant).
 func (c *Client) SearchPodcasts(ctx context.Context, term string) ([]Show, error) {
 	term = strings.TrimSpace(term)
 	if c.mock {
@@ -83,6 +85,7 @@ func (c *Client) SearchPodcasts(ctx context.Context, term string) ([]Show, error
 	return nil, fmt.Errorf("itunes search: after retries: %w", lastErr)
 }
 
+// fetchOnce does a single GET and JSON decode (8MB body cap so we don't OOM on garbage).
 func (c *Client) fetchOnce(ctx context.Context, rawURL string) ([]Show, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
@@ -113,6 +116,7 @@ func (c *Client) fetchOnce(ctx context.Context, rawURL string) ([]Show, error) {
 	return parsed.Results, nil
 }
 
+// min caps how much of a bad response body we stuff into an error string.
 func min(a, b int) int {
 	if a < b {
 		return a
@@ -120,6 +124,7 @@ func min(a, b int) int {
 	return b
 }
 
+// mockShows fabricates two stable-looking podcasts so CI and airplane mode still work.
 func mockShows(term string) []Show {
 	t := strings.TrimSpace(term)
 	if t == "" {

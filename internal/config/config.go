@@ -30,8 +30,8 @@ type Config struct {
 	Environment   string
 }
 
+// Load pulls settings from the environment; loads a local .env when it exists, then applies sane defaults in dev.
 func Load() Config {
-	// Optional: load .env when present (typical on a laptop); production relies on real env vars.
 	_ = godotenv.Load()
 
 	env := get("ENV", "development")
@@ -65,6 +65,7 @@ func Load() Config {
 	}
 }
 
+// get returns os.Getenv(key) when set, otherwise def.
 func get(key, def string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
@@ -84,6 +85,7 @@ func getBool(key string, def bool) bool {
 	return b
 }
 
+// getDuration treats the env value as whole seconds; non-numeric input keeps def.
 func getDuration(key string, def time.Duration) time.Duration {
 	v := os.Getenv(key)
 	if v == "" {

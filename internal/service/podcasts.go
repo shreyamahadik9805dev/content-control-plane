@@ -25,10 +25,12 @@ type Podcasts struct {
 	itunes *itunes.Client
 }
 
+// NewPodcasts builds the service the HTTP layer talks to.
 func NewPodcasts(repo repository.Store, c *cache.TTL, client *itunes.Client) *Podcasts {
 	return &Podcasts{repo: repo, cache: c, itunes: client}
 }
 
+// List hits the cache when we've seen the full catalog recently, else Postgres.
 func (s *Podcasts) List(ctx context.Context) ([]domain.Podcast, error) {
 	if v, ok := s.cache.Get(cacheKeyList); ok {
 		if pods, ok := v.([]domain.Podcast); ok {
@@ -43,6 +45,7 @@ func (s *Podcasts) List(ctx context.Context) ([]domain.Podcast, error) {
 	return pods, nil
 }
 
+// Get is like List but keyed per podcast id.
 func (s *Podcasts) Get(ctx context.Context, id uuid.UUID) (domain.Podcast, error) {
 	key := "podcast:" + id.String()
 	if v, ok := s.cache.Get(key); ok {
@@ -62,6 +65,7 @@ type PinRequest struct {
 	Pinned bool `json:"pinned"`
 }
 
+// SetPinned persists the flag, clears relevant cache keys, and logs audit.
 func (s *Podcasts) SetPinned(ctx context.Context, id uuid.UUID, pinned bool) error {
 	if err := s.repo.SetPinned(ctx, id, pinned); err != nil {
 		return err
@@ -76,6 +80,7 @@ func (s *Podcasts) SetPinned(ctx context.Context, id uuid.UUID, pinned bool) err
 	return s.repo.InsertAudit(ctx, action, id.String(), meta)
 }
 
+// Sync runs iTunes search, upserts rows, and records sync_runs + audit.
 func (s *Podcasts) Sync(ctx context.Context, query string) (domain.SyncRun, error) {
 	query = strings.TrimSpace(query)
 	if query == "" {
@@ -128,10 +133,12 @@ func (s *Podcasts) Sync(ctx context.Context, query string) (domain.SyncRun, erro
 	return out, nil
 }
 
+// AuditLogs is a straight pass-through to the repo (no caching).
 func (s *Podcasts) AuditLogs(ctx context.Context, limit int) ([]domain.AuditLog, error) {
 	return s.repo.ListAuditLogs(ctx, limit)
 }
 
+// normalizeShow maps an iTunes payload into our domain shape; skips junk rows via empty SourceID.
 func normalizeShow(sh itunes.Show) domain.Podcast {
 	if sh.CollectionID == 0 {
 		return domain.Podcast{}
@@ -159,6 +166,7 @@ func normalizeShow(sh itunes.Show) domain.Podcast {
 	}
 }
 
+// ErrIsNotFound is a small helper so handlers don't import repository errors.
 func ErrIsNotFound(err error) bool {
 	return errors.Is(err, repository.ErrNotFound)
 }

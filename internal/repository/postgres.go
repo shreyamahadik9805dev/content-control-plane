@@ -19,6 +19,7 @@ type Postgres struct {
 	pool *pgxpool.Pool
 }
 
+// NewPostgres opens a pool, pings once, and bails early if the DB isn't reachable.
 func NewPostgres(ctx context.Context, databaseURL string) (*Postgres, error) {
 	cfg, err := pgxpool.ParseConfig(databaseURL)
 	if err != nil {
@@ -39,6 +40,7 @@ func (p *Postgres) Close() {
 	p.pool.Close()
 }
 
+// ListPodcasts returns every row, newest updates first.
 func (p *Postgres) ListPodcasts(ctx context.Context) ([]domain.Podcast, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT id, source_id, title, author, categories, feed_url, artwork_url, track_count,
@@ -53,6 +55,7 @@ func (p *Postgres) ListPodcasts(ctx context.Context) ([]domain.Podcast, error) {
 	return scanPodcasts(rows)
 }
 
+// GetPodcastByID returns ErrNotFound when the UUID isn't in the table.
 func (p *Postgres) GetPodcastByID(ctx context.Context, id uuid.UUID) (domain.Podcast, error) {
 	row := p.pool.QueryRow(ctx, `
 		SELECT id, source_id, title, author, categories, feed_url, artwork_url, track_count,
@@ -66,6 +69,7 @@ func (p *Postgres) GetPodcastByID(ctx context.Context, id uuid.UUID) (domain.Pod
 	return pod, err
 }
 
+// UpsertPodcast inserts or updates on source_id conflict and returns the row id.
 func (p *Postgres) UpsertPodcast(ctx context.Context, pod domain.Podcast) (uuid.UUID, error) {
 	cats, err := json.Marshal(pod.Categories)
 	if err != nil {
@@ -88,6 +92,7 @@ func (p *Postgres) UpsertPodcast(ctx context.Context, pod domain.Podcast) (uuid.
 	return id, err
 }
 
+// SetPinned updates the flag; ErrNotFound if id doesn't exist.
 func (p *Postgres) SetPinned(ctx context.Context, id uuid.UUID, pinned bool) error {
 	tag, err := p.pool.Exec(ctx, `
 		UPDATE podcasts SET pinned = $2, updated_at = now() WHERE id = $1
@@ -101,6 +106,7 @@ func (p *Postgres) SetPinned(ctx context.Context, id uuid.UUID, pinned bool) err
 	return nil
 }
 
+// CreateSyncRun inserts a 'running' row (subject is usually the search query).
 func (p *Postgres) CreateSyncRun(ctx context.Context, subject string) (domain.SyncRun, error) {
 	var run domain.SyncRun
 	err := p.pool.QueryRow(ctx, `
@@ -114,6 +120,7 @@ func (p *Postgres) CreateSyncRun(ctx context.Context, subject string) (domain.Sy
 	return run, err
 }
 
+// CompleteSyncRun stamps status, counts, optional error text, and completed_at.
 func (p *Postgres) CompleteSyncRun(ctx context.Context, id uuid.UUID, status string, count int, errMsg *string) error {
 	_, err := p.pool.Exec(ctx, `
 		UPDATE sync_runs
@@ -123,6 +130,7 @@ func (p *Postgres) CompleteSyncRun(ctx context.Context, id uuid.UUID, status str
 	return err
 }
 
+// GetSyncRun loads one sync_runs row by id.
 func (p *Postgres) GetSyncRun(ctx context.Context, id uuid.UUID) (domain.SyncRun, error) {
 	row := p.pool.QueryRow(ctx, `
 		SELECT id, subject, status, records_processed, error_message, started_at, completed_at
@@ -139,6 +147,7 @@ func (p *Postgres) GetSyncRun(ctx context.Context, id uuid.UUID) (domain.SyncRun
 	return run, err
 }
 
+// InsertAudit appends one audit_logs row (metadata defaults to {} if empty).
 func (p *Postgres) InsertAudit(ctx context.Context, action, entityID string, metadata json.RawMessage) error {
 	if len(metadata) == 0 {
 		metadata = json.RawMessage(`{}`)
@@ -149,6 +158,7 @@ func (p *Postgres) InsertAudit(ctx context.Context, action, entityID string, met
 	return err
 }
 
+// ListAuditLogs returns newest-first; clamps silly limits to something reasonable.
 func (p *Postgres) ListAuditLogs(ctx context.Context, limit int) ([]domain.AuditLog, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
@@ -175,6 +185,7 @@ func (p *Postgres) ListAuditLogs(ctx context.Context, limit int) ([]domain.Audit
 	return out, rows.Err()
 }
 
+// scanPodcasts drains a result set into a slice (shared by list queries).
 func scanPodcasts(rows pgx.Rows) ([]domain.Podcast, error) {
 	out := make([]domain.Podcast, 0)
 	for rows.Next() {
@@ -187,6 +198,7 @@ func scanPodcasts(rows pgx.Rows) ([]domain.Podcast, error) {
 	return out, rows.Err()
 }
 
+// scanPodcast maps one row into domain.Podcast (JSON categories + nullable track_count).
 func scanPodcast(rows pgx.Row) (domain.Podcast, error) {
 	var p domain.Podcast
 	var rawCats []byte
@@ -209,6 +221,7 @@ func scanPodcast(rows pgx.Row) (domain.Podcast, error) {
 	return p, nil
 }
 
+// scanPodcastRow is a thin alias so QueryRow call sites read clearly.
 func scanPodcastRow(row pgx.Row) (domain.Podcast, error) {
 	return scanPodcast(row)
 }
