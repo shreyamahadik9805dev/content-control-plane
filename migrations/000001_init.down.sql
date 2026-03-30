@@ -1,0 +1,3 @@
+DROP TABLE IF EXISTS audit_logs;
+DROP TABLE IF EXISTS sync_runs;
+DROP TABLE IF EXISTS books;

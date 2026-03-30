@@ -1,0 +1,13 @@
+.env
+*.exe
+*.test
+/bin/
+/dist/
+/tmp/
+
+# Go
+coverage.out
+
+# Frontend
+frontend/node_modules/
+frontend/dist/
