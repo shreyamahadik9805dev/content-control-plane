@@ -50,5 +50,17 @@ services:
     ports:
       - "8080:8080"
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    depends_on:
+      - backend
+    environment:
+      # Browser on your machine calls the API at the host-mapped backend port.
+      VITE_API_URL: http://localhost:8080
+    ports:
+      - "5173:5173"
+
 volumes:
   pgdata:

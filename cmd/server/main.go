@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"log"
+	"net/http"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -40,6 +41,19 @@ func main() {
 	h := handler.New(podcasts)
 
 	r := gin.Default()
+	// Browsers treat the Vite dev server (another port) as a separate origin; only open this up in development.
+	if cfg.Environment == "development" {
+		r.Use(func(c *gin.Context) {
+			c.Header("Access-Control-Allow-Origin", "*")
+			c.Header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+			c.Header("Access-Control-Allow-Headers", "Content-Type")
+			if c.Request.Method == http.MethodOptions {
+				c.AbortWithStatus(http.StatusNoContent)
+				return
+			}
+			c.Next()
+		})
+	}
 	h.Register(r)
 
 	log.Printf("listening on %s", cfg.HTTPAddr)
