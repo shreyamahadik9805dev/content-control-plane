@@ -9,7 +9,7 @@ This document is the **runbook**: how to start the stack, use the operator UI, h
 ## Prerequisites
 
 - **Docker** and **Docker Compose** — recommended; runs Postgres, migrations, backend, and the Vite dev server together.
-- **Without Compose:** **Go 1.22+** and **PostgreSQL 16** for the API on the host, plus **Node.js 20+** and **npm** if you run **`npm run dev`** in **`frontend/`** (the Compose `frontend` image already includes Node 22).
+- **Without Compose:** **Go 1.25+** (see **`go.mod`**) and **PostgreSQL 16** for the API on the host, plus **Node.js 20+** and **npm** if you run **`npm run dev`** in **`frontend/`** (the Compose `frontend` image already includes Node 22).
 
 ---
 
@@ -114,7 +114,7 @@ curl -s -X POST "http://localhost:8080/podcasts/PODCAST_UUID/pin" \
 
 ---
 
-## Database GUI (e.g. Beekeeper Studio)
+## Database GUI (I am using Beekeeper Studio)
 
 Connect to the Compose Postgres from the host:
 
