@@ -1,6 +1,6 @@
 # How to run the project
 
-This document is the **runbook**: how to start the stack, use the operator UI, hit the API with `curl`, and (later) run automated tests.
+This document is the **runbook**: how to start the stack, use the operator UI, hit the API with `curl`, and run the **Go tests**.
 
 **Currently:** **backend** (Go + Postgres + migrations), **operator UI** (`frontend/`), and Docker Compose wiring for both are in the repo.
 
@@ -114,7 +114,7 @@ curl -s -X POST "http://localhost:8080/podcasts/PODCAST_UUID/pin" \
 
 ---
 
-## Database GUI (I am using Beekeeper Studio)
+## Database GUI (e.g. Beekeeper Studio)
 
 Connect to the Compose Postgres from the host:
 
@@ -131,6 +131,18 @@ Application tables live in the **`public`** schema (`podcasts`, `sync_runs`, `au
 
 ---
 
-## Tests (later)
+## Tests
 
-When automated tests land, this section will list commands (for example `go test ./...` and any frontend test script).
+From the **repository root**, with **Go** installed (version in **`go.mod`**):
+
+```bash
+go test ./internal/... ./cmd/... ./tests/...
+```
+
+**Result:** every package with tests should show **`ok`**; packages without tests show **`? … [no test files]`**. If anything **`FAIL`**s, the command exits non-zero. For an explicit line after a successful run:
+
+```bash
+go test ./internal/... ./cmd/... ./tests/... && echo "Tests passed." || echo "Tests failed."
+```
+
+You do **not** need Docker or Postgres running for these tests; they use mocks and stubs. For a walkthrough-friendly list of scenario names, run **`go test ./tests/... -v`** (each test has a short note above it in **`tests/scenarios_test.go`**).
