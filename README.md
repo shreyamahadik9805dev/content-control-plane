@@ -192,8 +192,8 @@ Implemented in **`migrations/`** (tables below).
 
 ## AI usage
 
-I use AI-assisted tools (e.g. ChatGPT/Claude) mainly for the convenience around **boilerplate**, **documentation 
-drafting**, and occasional **design iteration**; **architecture decisions, and review-ready quality** 
+I used AI-assisted tools (e.g. ChatGPT/Claude) mainly for the convenience around **boilerplate**, **documentation 
+drafting**, and occasional **design iteration** especially for writing tests framework, frontend UI and UX improvements, layout choices and feature selection; **architecture decisions, and review-ready quality** 
 ---
 
 ## Third-party attribution
