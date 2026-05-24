@@ -6,7 +6,11 @@
 
 ## What this is
 
-This repo is a **content control plane** for **podcast shows** (show-level metadata in v1—not a full episode catalog). It pulls from Apple’s **iTunes Search** API (`media=podcast`), **normalizes** results into **PostgreSQL**, and exposes a **JSON HTTP API** (plus a **Vite + React** UI under **`frontend/`**) so you can **sync** on demand, **browse** the catalog, **pin** rows for curation, and read an **append-only audit** trail plus **sync run** history. The same pattern applies anytime you’re integrating **someone else’s catalog**; podcasts are just a realistic, API-key-free example.
+This repo is a **content control plane** for **podcast shows** (show-level metadata in v1—not a full episode catalog). It pulls from Apple’s **iTunes Search** API (`media=podcast`), **normalizes** results into **PostgreSQL**, and exposes a **JSON HTTP API** (plus a **Vite + React** UI under **`frontend/`**) so you can **sync** on demand, **browse** the catalog, **pin** rows for curation, and read an **append-only audit** trail plus **sync run** history.
+
+**Product AI (human-in-the-loop):** operators can request **structured metadata suggestions** (summary, operator tags, language, confidence) for a show. Suggestions land as **pending proposals** in Postgres; the catalog updates only after **Accept**—**Reject** leaves canonical rows unchanged. Mock mode works offline without API keys.
+
+The same pattern applies anytime you’re integrating **someone else’s catalog**; podcasts are just a realistic, API-key-free example.
 
 ### What problem it solves
 
@@ -34,7 +38,8 @@ This project is that **middle layer** in miniature: **ingest** from iTunes → *
 - **Persist** catalog + **sync run** history + **append-only audit** events in **PostgreSQL**.
 - **Read path** with a **small in-process TTL cache** and explicit **cache invalidation** on writes that affect list/detail.
 - **Curation:** at minimum **pin / unpin** with audit; **featured** reserved for follow-on UX if time allows.
-- **Operator clarity:** how to run the stack and example API calls are in **[docs/RUNNING.md](docs/RUNNING.md)** (Docker-first).
+- **Product AI:** **generate → review → accept/reject** proposals for operator **summary** and **operator_tags**; audit events `proposal.created`, `proposal.accepted`, `proposal.rejected`. Default **`AI_MOCK=true`** in Compose (no vendor key required).
+- **Operator clarity:** how to run the stack and example API calls are in **[docs/RUNNING.md](docs/RUNNING.md)** (Docker-first). Deeper AI runbook: **[docs/PRODUCT_AI.md](docs/PRODUCT_AI.md)**.
 - **Transparency:** tradeoffs stay in this doc; **how to run tests** is in **[docs/RUNNING.md](docs/RUNNING.md)**. See **AI usage** at the bottom for tooling disclosure.
 
 
@@ -73,11 +78,13 @@ flowchart TB
     S[Service layer]
     R[Repository]
     IT[iTunes client]
+    AI[AI suggester]
     CA[TTL cache]
   end
 
   subgraph external [External]
     ITU[iTunes Search API]
+    LLM[OpenAI optional]
   end
 
   subgraph storage [Storage]
@@ -92,22 +99,27 @@ flowchart TB
   R --> PG
   S --> IT
   IT --> ITU
+  S --> AI
+  AI -.-> LLM
 ```
 
 ### Layering
 
 ```
 HTTP  →  service  →  repository  →  PostgreSQL
+           ↓              ↑
+     iTunes client    proposals (pending → accept/reject)
            ↓
-     iTunes HTTP client
+     AI suggester (mock or OpenAI; structured JSON only)
            ↓
      in-process TTL cache (read path)
 ```
 
 - **Handlers:** transport only (status codes, binding, thin).
-- **Service:** sync orchestration, cache invalidation policy, audit/sync_run writes.
+- **Service:** sync orchestration, **proposal** lifecycle, cache invalidation, audit/sync_run writes.
 - **Repository:** interface + Postgres implementation (`pgx`) for test seams.
 - **iTunes package:** timeouts, retries, optional **mock** for offline runs.
+- **`internal/ai`:** `Suggester` interface; **mock** when `AI_MOCK=true`, else **OpenAI** when configured. The model never writes Postgres directly.
 
 ---
 
@@ -122,15 +134,17 @@ content-control-plane/
 │   ├── config/              # env / .env loading
 │   ├── domain/              # shared models (JSON tags)
 │   ├── handler/             # Gin routes
-│   ├── service/             # business logic
+│   ├── service/             # podcasts + proposals (AI apply path)
 │   ├── repository/          # Store interface + postgres
+│   ├── ai/                  # mock + OpenAI structured suggestions
 │   ├── client/itunes/       # external API + mock
 │   └── cache/               # TTL wrapper
-├── migrations/              # SQL (golang-migrate compatible)
+├── migrations/              # SQL (golang-migrate compatible); includes 000003_product_ai
 ├── tests/                   # cross-package scenario tests (presenter-oriented names)
-├── frontend/                # Vite + React + TS
+├── frontend/                # Vite + React + TS (detail panel: AI proposals)
 ├── docs/
-│   └── RUNNING.md           # runbook: Compose, UI, API checks, tests
+│   ├── RUNNING.md           # runbook: Compose, UI, API checks, tests
+│   └── PRODUCT_AI.md        # Product AI scope, env, demo steps
 ├── docker-compose.yml
 ├── Dockerfile
 ├── .env.example
@@ -145,9 +159,10 @@ content-control-plane/
 
 Implemented in **`migrations/`** (tables below).
 
-- **`podcasts`** — internal `id`, unique **`source_id`** (e.g. iTunes `collectionId`), title, publisher/author, categories (`jsonb`), feed + artwork URLs, optional episode count, **`pinned` / `featured`**, timestamps. Upserts **refresh metadata** without clobbering curation flags on conflict.
+- **`podcasts`** — internal `id`, unique **`source_id`** (e.g. iTunes `collectionId`), title, publisher/author, categories (`jsonb`), feed + artwork URLs, optional episode count, **`summary`** and **`operator_tags`** (operator-facing enrichment, set on proposal accept), **`pinned` / `featured`**, timestamps. iTunes upserts **refresh vendor fields** without clobbering curation flags or accepted AI enrichment on conflict.
+- **`ai_proposals`** — pending / accepted / rejected suggestions per podcast: structured **`payload`**, input **`context`**, model/provider/latency metadata, timestamps.
 - **`sync_runs`** — one row per sync attempt: query string, status, counts, errors, start/end times.
-- **`audit_logs`** — append-only events (e.g. pin/unpin, sync completed/failed) with small JSON metadata.
+- **`audit_logs`** — append-only events (e.g. pin/unpin, sync completed/failed, `proposal.created` / `accepted` / `rejected`) with small JSON metadata.
 
 ---
 
@@ -161,8 +176,24 @@ Implemented in **`migrations/`** (tables below).
 | `GET` | `/podcasts/:id` | Detail by UUID |
 | `POST` | `/podcasts/:id/pin` | Body `{"pinned": bool}`; writes audit |
 | `GET` | `/audit-logs?limit=…` | Recent audit rows |
+| `POST` | `/podcasts/:id/suggestions` | Create **pending** AI proposal (mock or OpenAI) |
+| `GET` | `/podcasts/:id/suggestions` | List proposals; `?status=pending` optional |
+| `POST` | `/suggestions/:id/accept` | Apply summary/tags to podcast; audit |
+| `POST` | `/suggestions/:id/reject` | Reject proposal; optional `{"note":"…"}` |
 
-**Examples:** **[docs/RUNNING.md](docs/RUNNING.md)** (`curl` snippets).
+**Examples:** **[docs/RUNNING.md](docs/RUNNING.md)** (`curl` snippets). **Product AI demo:** sync a query → select a show in the UI → **Generate suggestion** → Accept or Reject → check **Audit**.
+
+### Product AI configuration
+
+| Variable | Default (Compose) | Purpose |
+|----------|-------------------|---------|
+| `AI_MOCK` | `true` | Deterministic suggestions; no API key |
+| `AI_PROVIDER` | `openai` | Live provider when mock is off |
+| `OPENAI_API_KEY` | — | Required when `AI_MOCK=false` |
+| `AI_MODEL` | `gpt-4o-mini` | Chat model for live calls |
+| `AI_HTTP_TIMEOUT_SECONDS` | `60` | Provider HTTP timeout |
+
+See **`.env.example`** and **[docs/PRODUCT_AI.md](docs/PRODUCT_AI.md)**.
 
 ---
 
@@ -177,6 +208,7 @@ Implemented in **`migrations/`** (tables below).
 | Migrations | golang-migrate (CLI) | 
 | Cache | go-cache (memory) | 
 | External API | iTunes Search | 
+| Product AI | Mock (default) or OpenAI Chat Completions (structured JSON) |
 | UI | Vite + React + TS |
 | Run | Docker Compose | 
 
@@ -187,13 +219,16 @@ Implemented in **`migrations/`** (tables below).
 - **In-memory cache:** easy locally; not shared across replicas (Redis deferred as a future scope).
 - **On-demand sync:** no scheduler in v1; reduces moving parts as I prioritize the scope.
 - **iTunes:** subject to network and vendor behavior; mock mode for CI/offline.
+- **Human-in-the-loop AI:** proposals are stored separately from canonical catalog rows; **accept** is the only path that mutates `summary` / `operator_tags`, with full audit. No autonomous curation in v1.
 
 ---
 
 ## AI usage
 
-I use AI-assisted tools (e.g. ChatGPT/Claude) mainly for the convenience around **boilerplate**, **documentation 
-drafting**, and occasional **design iteration**; **architecture decisions, and review-ready quality** 
+**In the product:** optional **metadata suggestions** with operator approval (see **Product AI** above). The LLM returns structured JSON; the Go service validates and persists proposals—never silent writes to production catalog fields.
+
+**In development:** AI-assisted tools (e.g. ChatGPT/Claude/Cursor) helped with **boilerplate**, **documentation drafting**, and **design iteration**. **Architecture decisions and review-ready quality** remain human-owned.
+
 ---
 
 ## Third-party attribution
