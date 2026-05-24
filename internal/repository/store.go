@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -20,6 +21,12 @@ type Store interface {
 	GetSyncRun(ctx context.Context, id uuid.UUID) (domain.SyncRun, error)
 	InsertAudit(ctx context.Context, action, entityID string, metadata json.RawMessage) error
 	ListAuditLogs(ctx context.Context, limit int) ([]domain.AuditLog, error)
+
+	InsertProposal(ctx context.Context, p domain.AIProposal) (uuid.UUID, error)
+	GetProposalByID(ctx context.Context, id uuid.UUID) (domain.AIProposal, error)
+	ListProposalsForPodcast(ctx context.Context, podcastID uuid.UUID, status string) ([]domain.AIProposal, error)
+	SetProposalStatus(ctx context.Context, id uuid.UUID, status string, resolvedAt time.Time) error
+	UpdatePodcastEnrichment(ctx context.Context, id uuid.UUID, summary string, operatorTags []string) error
 }
 
 var _ Store = (*Postgres)(nil)

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -44,6 +45,7 @@ func (p *Postgres) Close() {
 func (p *Postgres) ListPodcasts(ctx context.Context) ([]domain.Podcast, error) {
 	rows, err := p.pool.Query(ctx, `
 		SELECT id, source_id, title, author, categories, feed_url, artwork_url, track_count,
+		       summary, operator_tags,
 		       pinned, featured, created_at, updated_at
 		FROM podcasts
 		ORDER BY updated_at DESC
@@ -59,6 +61,7 @@ func (p *Postgres) ListPodcasts(ctx context.Context) ([]domain.Podcast, error) {
 func (p *Postgres) GetPodcastByID(ctx context.Context, id uuid.UUID) (domain.Podcast, error) {
 	row := p.pool.QueryRow(ctx, `
 		SELECT id, source_id, title, author, categories, feed_url, artwork_url, track_count,
+		       summary, operator_tags,
 		       pinned, featured, created_at, updated_at
 		FROM podcasts WHERE id = $1
 	`, id)
@@ -70,6 +73,7 @@ func (p *Postgres) GetPodcastByID(ctx context.Context, id uuid.UUID) (domain.Pod
 }
 
 // UpsertPodcast inserts or updates on source_id conflict and returns the row id.
+// iTunes sync fields update on conflict; summary and operator_tags are left unchanged for existing rows.
 func (p *Postgres) UpsertPodcast(ctx context.Context, pod domain.Podcast) (uuid.UUID, error) {
 	cats, err := json.Marshal(pod.Categories)
 	if err != nil {
@@ -185,6 +189,124 @@ func (p *Postgres) ListAuditLogs(ctx context.Context, limit int) ([]domain.Audit
 	return out, rows.Err()
 }
 
+// InsertProposal persists a new proposal row and returns its id.
+func (p *Postgres) InsertProposal(ctx context.Context, pr domain.AIProposal) (uuid.UUID, error) {
+	payload := pr.Payload
+	if len(payload) == 0 {
+		payload = json.RawMessage(`{}`)
+	}
+	uctx := pr.Context
+	if len(uctx) == 0 {
+		uctx = json.RawMessage(`{}`)
+	}
+	var id uuid.UUID
+	err := p.pool.QueryRow(ctx, `
+		INSERT INTO ai_proposals (podcast_id, status, kind, payload, context, model, provider, latency_ms)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+		RETURNING id
+	`, pr.PodcastID, pr.Status, pr.Kind, payload, uctx, pr.Model, pr.Provider, pr.LatencyMS).Scan(&id)
+	return id, err
+}
+
+// GetProposalByID loads one proposal or ErrNotFound.
+func (p *Postgres) GetProposalByID(ctx context.Context, id uuid.UUID) (domain.AIProposal, error) {
+	row := p.pool.QueryRow(ctx, `
+		SELECT id, podcast_id, status, kind, payload, context, model, provider, latency_ms, created_at, resolved_at
+		FROM ai_proposals WHERE id = $1
+	`, id)
+	return scanProposal(row)
+}
+
+// ListProposalsForPodcast lists newest first; empty status returns all statuses.
+func (p *Postgres) ListProposalsForPodcast(ctx context.Context, podcastID uuid.UUID, status string) ([]domain.AIProposal, error) {
+	var (
+		rows pgx.Rows
+		err  error
+	)
+	if status != "" {
+		rows, err = p.pool.Query(ctx, `
+			SELECT id, podcast_id, status, kind, payload, context, model, provider, latency_ms, created_at, resolved_at
+			FROM ai_proposals WHERE podcast_id = $1 AND status = $2
+			ORDER BY created_at DESC
+		`, podcastID, status)
+	} else {
+		rows, err = p.pool.Query(ctx, `
+			SELECT id, podcast_id, status, kind, payload, context, model, provider, latency_ms, created_at, resolved_at
+			FROM ai_proposals WHERE podcast_id = $1
+			ORDER BY created_at DESC
+		`, podcastID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := make([]domain.AIProposal, 0)
+	for rows.Next() {
+		pr, err := scanProposal(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, pr)
+	}
+	return out, rows.Err()
+}
+
+// SetProposalStatus updates status and resolved_at (caller passes resolution time, usually now).
+func (p *Postgres) SetProposalStatus(ctx context.Context, id uuid.UUID, status string, resolvedAt time.Time) error {
+	tag, err := p.pool.Exec(ctx, `
+		UPDATE ai_proposals SET status = $2, resolved_at = $3 WHERE id = $1
+	`, id, status, resolvedAt)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+// UpdatePodcastEnrichment sets summary and operator_tags; ErrNotFound if id missing.
+func (p *Postgres) UpdatePodcastEnrichment(ctx context.Context, id uuid.UUID, summary string, operatorTags []string) error {
+	raw, err := json.Marshal(operatorTags)
+	if err != nil {
+		return err
+	}
+	if string(raw) == "null" {
+		raw = []byte("[]")
+	}
+	tag, err := p.pool.Exec(ctx, `
+		UPDATE podcasts SET summary = $2, operator_tags = $3::jsonb, updated_at = now() WHERE id = $1
+	`, id, summary, raw)
+	if err != nil {
+		return err
+	}
+	if tag.RowsAffected() == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func scanProposal(rows pgx.Row) (domain.AIProposal, error) {
+	var pr domain.AIProposal
+	var latency *int32
+	err := rows.Scan(
+		&pr.ID, &pr.PodcastID, &pr.Status, &pr.Kind,
+		&pr.Payload, &pr.Context, &pr.Model, &pr.Provider, &latency,
+		&pr.CreatedAt, &pr.ResolvedAt,
+	)
+	if errors.Is(err, pgx.ErrNoRows) {
+		return domain.AIProposal{}, ErrNotFound
+	}
+	if err != nil {
+		return domain.AIProposal{}, err
+	}
+	if latency != nil {
+		n := int(*latency)
+		pr.LatencyMS = &n
+	}
+	return pr, nil
+}
+
 // scanPodcasts drains a result set into a slice (shared by list queries).
 func scanPodcasts(rows pgx.Rows) ([]domain.Podcast, error) {
 	out := make([]domain.Podcast, 0)
@@ -201,11 +323,12 @@ func scanPodcasts(rows pgx.Rows) ([]domain.Podcast, error) {
 // scanPodcast maps one row into domain.Podcast (JSON categories + nullable track_count).
 func scanPodcast(rows pgx.Row) (domain.Podcast, error) {
 	var p domain.Podcast
-	var rawCats []byte
+	var rawCats, rawTags []byte
 	var tc *int32
 	err := rows.Scan(
 		&p.ID, &p.SourceID, &p.Title, &p.Author, &rawCats,
 		&p.FeedURL, &p.ArtworkURL, &tc,
+		&p.Summary, &rawTags,
 		&p.Pinned, &p.Featured, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
@@ -213,6 +336,9 @@ func scanPodcast(rows pgx.Row) (domain.Podcast, error) {
 	}
 	if len(rawCats) > 0 {
 		_ = json.Unmarshal(rawCats, &p.Categories)
+	}
+	if len(rawTags) > 0 {
+		_ = json.Unmarshal(rawTags, &p.OperatorTags)
 	}
 	if tc != nil {
 		n := int(*tc)

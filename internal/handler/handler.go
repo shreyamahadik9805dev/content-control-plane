@@ -12,12 +12,13 @@ import (
 )
 
 type Handler struct {
-	podcasts *service.Podcasts
+	podcasts  *service.Podcasts
+	proposals *service.Proposals
 }
 
-// New hands the podcast service to HTTP handlers.
-func New(podcasts *service.Podcasts) *Handler {
-	return &Handler{podcasts: podcasts}
+// New hands the podcast service to HTTP handlers. proposals may be nil (AI routes are omitted).
+func New(podcasts *service.Podcasts, proposals *service.Proposals) *Handler {
+	return &Handler{podcasts: podcasts, proposals: proposals}
 }
 
 // Register wires paths on r; keep new endpoints here so nothing hides in middleware.
@@ -26,6 +27,12 @@ func (h *Handler) Register(r *gin.Engine) {
 
 	r.POST("/sync/podcasts", h.syncPodcasts)
 	r.GET("/podcasts", h.listPodcasts)
+	if h.proposals != nil {
+		r.POST("/podcasts/:id/suggestions", h.createSuggestion)
+		r.GET("/podcasts/:id/suggestions", h.listSuggestions)
+		r.POST("/suggestions/:id/accept", h.acceptSuggestion)
+		r.POST("/suggestions/:id/reject", h.rejectSuggestion)
+	}
 	r.GET("/podcasts/:id", h.getPodcast)
 	r.POST("/podcasts/:id/pin", h.pinPodcast)
 	r.GET("/audit-logs", h.auditLogs)
@@ -122,4 +129,91 @@ func (h *Handler) auditLogs(c *gin.Context) {
 		return
 	}
 	c.JSON(http.StatusOK, logs)
+}
+
+type rejectBody struct {
+	Note string `json:"note"`
+}
+
+func (h *Handler) createSuggestion(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	pr, err := h.proposals.Generate(c.Request.Context(), id)
+	if err != nil {
+		if service.ErrIsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "podcast not found"})
+			return
+		}
+		c.JSON(http.StatusBadGateway, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusCreated, pr)
+}
+
+func (h *Handler) listSuggestions(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	status := c.Query("status")
+	list, err := h.proposals.ListForPodcast(c.Request.Context(), id, status)
+	if err != nil {
+		if service.ErrIsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": "podcast not found"})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, list)
+}
+
+func (h *Handler) acceptSuggestion(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	pod, err := h.proposals.Accept(c.Request.Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrProposalNotPending) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if service.ErrIsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, pod)
+}
+
+func (h *Handler) rejectSuggestion(c *gin.Context) {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": "invalid id"})
+		return
+	}
+	var body rejectBody
+	_ = c.ShouldBindJSON(&body)
+	err = h.proposals.Reject(c.Request.Context(), id, body.Note)
+	if err != nil {
+		if errors.Is(err, service.ErrProposalNotPending) {
+			c.JSON(http.StatusConflict, gin.H{"error": err.Error()})
+			return
+		}
+		if service.ErrIsNotFound(err) {
+			c.JSON(http.StatusNotFound, gin.H{"error": err.Error()})
+			return
+		}
+		c.JSON(http.StatusInternalServerError, gin.H{"error": err.Error()})
+		return
+	}
+	c.JSON(http.StatusOK, gin.H{"ok": true})
 }

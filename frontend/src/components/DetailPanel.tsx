@@ -1,4 +1,4 @@
-import type { Podcast } from '../types'
+import type { AIProposal, Podcast } from '../types'
 import { formatRelative, freshnessForPodcast } from '../lib/freshness'
 import { FreshnessBadge } from './FreshnessBadge'
 
@@ -6,9 +6,23 @@ type Props = {
   podcast: Podcast | null
   onPinToggle: (id: string) => void
   onClose: () => void
+  pendingProposals: AIProposal[]
+  proposalBusy: boolean
+  onGenerateSuggestion: () => void
+  onAcceptProposal: (proposalId: string) => void
+  onRejectProposal: (proposalId: string) => void
 }
 
-export function DetailPanel({ podcast, onPinToggle, onClose }: Props) {
+export function DetailPanel({
+  podcast,
+  onPinToggle,
+  onClose,
+  pendingProposals,
+  proposalBusy,
+  onGenerateSuggestion,
+  onAcceptProposal,
+  onRejectProposal,
+}: Props) {
   if (!podcast) {
     return (
       <aside className="detail-panel detail-panel--empty" aria-label="Podcast detail">
@@ -21,6 +35,7 @@ export function DetailPanel({ podcast, onPinToggle, onClose }: Props) {
   }
 
   const fresh = freshnessForPodcast(podcast)
+  const pending = pendingProposals[0]
 
   return (
     <aside className="detail-panel" aria-label="Podcast detail">
@@ -91,7 +106,100 @@ export function DetailPanel({ podcast, onPinToggle, onClose }: Props) {
             </div>
           </dd>
         </div>
+        {podcast.summary ? (
+          <div>
+            <dt>Operator summary</dt>
+            <dd>{podcast.summary}</dd>
+          </div>
+        ) : null}
+        {podcast.operatorTags.length > 0 ? (
+          <div>
+            <dt>Operator tags</dt>
+            <dd>
+              <div className="chips">
+                {podcast.operatorTags.map((s) => (
+                  <span key={s} className="chip chip--accent">
+                    {s}
+                  </span>
+                ))}
+              </div>
+            </dd>
+          </div>
+        ) : null}
       </dl>
+
+      <div className="detail-ai">
+        <h3 className="detail-ai__title">AI metadata (human-in-the-loop)</h3>
+        <p className="detail-ai__lede">
+          Generates a <strong>pending</strong> proposal only. Accept applies{' '}
+          <span className="mono">summary</span> +{' '}
+          <span className="mono">operator_tags</span> to this row and writes{' '}
+          <span className="mono">audit</span> + <span className="mono">proposal</span>{' '}
+          records.
+        </p>
+        <button
+          type="button"
+          className="btn btn--secondary"
+          disabled={proposalBusy}
+          onClick={onGenerateSuggestion}
+        >
+          {proposalBusy ? 'Working…' : 'Generate suggestion'}
+        </button>
+        {pending ? (
+          <div className="detail-ai__proposal">
+            <div className="detail-ai__meta mono">
+              {pending.provider}/{pending.model}
+              {pending.latency_ms != null ? ` · ${pending.latency_ms}ms` : ''}
+            </div>
+            {pending.payload.summary ? (
+              <p className="detail-ai__summary">{pending.payload.summary}</p>
+            ) : null}
+            {pending.payload.operator_tags &&
+            pending.payload.operator_tags.length > 0 ? (
+              <div className="chips">
+                {pending.payload.operator_tags.map((t) => (
+                  <span key={t} className="chip">
+                    {t}
+                  </span>
+                ))}
+              </div>
+            ) : null}
+            <div className="detail-ai__flags">
+              {pending.payload.language ? (
+                <span className="detail-ai__pill">
+                  lang {pending.payload.language}
+                </span>
+              ) : null}
+              {pending.payload.confidence != null ? (
+                <span className="detail-ai__pill">
+                  confidence {pending.payload.confidence.toFixed(2)}
+                </span>
+              ) : null}
+            </div>
+            <div className="detail-ai__actions">
+              <button
+                type="button"
+                className="btn btn--secondary"
+                disabled={proposalBusy}
+                onClick={() => onAcceptProposal(pending.id)}
+              >
+                Accept
+              </button>
+              <button
+                type="button"
+                className="btn btn--ghost"
+                disabled={proposalBusy}
+                onClick={() => onRejectProposal(pending.id)}
+              >
+                Reject
+              </button>
+            </div>
+          </div>
+        ) : (
+          <p className="detail-ai__empty">No pending proposals for this show.</p>
+        )}
+      </div>
+
       <div className="detail-actions">
         <button
           type="button"

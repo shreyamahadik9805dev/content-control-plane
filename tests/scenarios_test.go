@@ -62,7 +62,7 @@ func TestFlow_SyncUpsertsMockShows(t *testing.T) {
 // Liveness stays cheap: /health is 200 even when the podcast service is nil.
 func TestFlow_LivenessAlwaysOK(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	h := handler.New(nil)
+	h := handler.New(nil, nil)
 	r := gin.New()
 	h.Register(r)
 
@@ -79,7 +79,7 @@ func TestFlow_LivenessAlwaysOK(t *testing.T) {
 func TestFlow_SyncWithoutQueryIs400(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc := service.NewPodcasts(&noopStore{}, cache.New(time.Minute, 2*time.Minute), itunes.New("", true))
-	h := handler.New(svc)
+	h := handler.New(svc, nil)
 
 	r := gin.New()
 	h.Register(r)

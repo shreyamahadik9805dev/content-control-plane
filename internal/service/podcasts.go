@@ -65,6 +65,16 @@ type PinRequest struct {
 	Pinned bool `json:"pinned"`
 }
 
+// ApplyEnrichment updates operator-facing summary and tags; used after accepting an AI proposal.
+func (s *Podcasts) ApplyEnrichment(ctx context.Context, id uuid.UUID, summary string, operatorTags []string) error {
+	if err := s.repo.UpdatePodcastEnrichment(ctx, id, summary, operatorTags); err != nil {
+		return err
+	}
+	s.cache.Delete("podcast:" + id.String())
+	s.cache.Delete(cacheKeyList)
+	return nil
+}
+
 // SetPinned persists the flag, clears relevant cache keys, and logs audit.
 func (s *Podcasts) SetPinned(ctx context.Context, id uuid.UUID, pinned bool) error {
 	if err := s.repo.SetPinned(ctx, id, pinned); err != nil {

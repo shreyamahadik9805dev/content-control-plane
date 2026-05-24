@@ -28,6 +28,12 @@ type Config struct {
 	ITunesMock    bool
 	CacheTTL      time.Duration
 	Environment   string
+
+	AIMock       bool
+	AIProvider   string
+	OpenAIAPIKey string
+	AIModel      string
+	AITimeout    time.Duration
 }
 
 // Load pulls settings from the environment; loads a local .env when it exists, then applies sane defaults in dev.
@@ -56,12 +62,18 @@ func Load() Config {
 	}
 
 	return Config{
-		HTTPAddr:      get("HTTP_ADDR", ":8080"),
+		HTTPAddr:    get("HTTP_ADDR", ":8080"),
 		DatabaseURL: dbURL,
 		ITunesBaseURL: get("ITUNES_BASE_URL", "https://itunes.apple.com"),
 		ITunesMock:    itunesMock,
 		CacheTTL:      getDuration("CACHE_TTL_SECONDS", 30*time.Second),
 		Environment:   env,
+
+		AIMock:       getBool("AI_MOCK", true),
+		AIProvider:   get("AI_PROVIDER", "openai"),
+		OpenAIAPIKey: os.Getenv("OPENAI_API_KEY"),
+		AIModel:      get("AI_MODEL", "gpt-4o-mini"),
+		AITimeout:    getDuration("AI_HTTP_TIMEOUT_SECONDS", 60*time.Second),
 	}
 }
 

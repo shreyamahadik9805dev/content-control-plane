@@ -3,6 +3,7 @@ package tests
 import (
 	"context"
 	"encoding/json"
+	"time"
 
 	"github.com/google/uuid"
 
@@ -61,6 +62,26 @@ func (s *stubStore) ListAuditLogs(ctx context.Context, limit int) ([]domain.Audi
 	return nil, nil
 }
 
+func (s *stubStore) InsertProposal(ctx context.Context, p domain.AIProposal) (uuid.UUID, error) {
+	return uuid.New(), nil
+}
+
+func (s *stubStore) GetProposalByID(ctx context.Context, id uuid.UUID) (domain.AIProposal, error) {
+	return domain.AIProposal{}, repository.ErrNotFound
+}
+
+func (s *stubStore) ListProposalsForPodcast(ctx context.Context, podcastID uuid.UUID, status string) ([]domain.AIProposal, error) {
+	return nil, nil
+}
+
+func (s *stubStore) SetProposalStatus(ctx context.Context, id uuid.UUID, status string, resolvedAt time.Time) error {
+	return nil
+}
+
+func (s *stubStore) UpdatePodcastEnrichment(ctx context.Context, id uuid.UUID, summary string, operatorTags []string) error {
+	return nil
+}
+
 // noopStore: Sync returns before touching the repo when query is empty; methods unused in those tests.
 type noopStore struct{}
 
@@ -88,4 +109,24 @@ func (noopStore) InsertAudit(ctx context.Context, action, entityID string, metad
 }
 func (noopStore) ListAuditLogs(ctx context.Context, limit int) ([]domain.AuditLog, error) {
 	return nil, nil
+}
+
+func (noopStore) InsertProposal(ctx context.Context, p domain.AIProposal) (uuid.UUID, error) {
+	return uuid.Nil, nil
+}
+
+func (noopStore) GetProposalByID(ctx context.Context, id uuid.UUID) (domain.AIProposal, error) {
+	return domain.AIProposal{}, repository.ErrNotFound
+}
+
+func (noopStore) ListProposalsForPodcast(ctx context.Context, podcastID uuid.UUID, status string) ([]domain.AIProposal, error) {
+	return nil, nil
+}
+
+func (noopStore) SetProposalStatus(ctx context.Context, id uuid.UUID, status string, resolvedAt time.Time) error {
+	return nil
+}
+
+func (noopStore) UpdatePodcastEnrichment(ctx context.Context, id uuid.UUID, summary string, operatorTags []string) error {
+	return nil
 }

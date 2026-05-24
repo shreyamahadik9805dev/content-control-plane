@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
 import {
+  acceptSuggestion,
+  createSuggestion,
   fetchAuditLogs,
   fetchPodcasts,
+  fetchSuggestions,
   getApiBaseDisplay,
+  rejectSuggestion,
   setPodcastPinned,
   syncPodcasts,
 } from './api'
@@ -12,7 +16,7 @@ import { PodcastFilters } from './components/PodcastFilters'
 import { PodcastTable } from './components/PodcastTable'
 import { SidebarNav } from './components/SidebarNav'
 import { SyncToolbar } from './components/SyncToolbar'
-import type { AuditEntry, Podcast, SyncRun } from './types'
+import type { AIProposal, AuditEntry, Podcast, SyncRun } from './types'
 import './App.css'
 
 // Single-page operator shell: catalog + detail, sync toolbar, audit tab.
@@ -36,10 +40,14 @@ function filterPodcasts(
     if (pinnedOnly && !p.pinned) return false
     if (category && !p.categories.includes(category)) return false
     if (!q) return true
+    const inSummary = p.summary.toLowerCase().includes(q)
+    const inTags = p.operatorTags.some((t) => t.toLowerCase().includes(q))
     return (
       p.title.toLowerCase().includes(q) ||
       p.author.toLowerCase().includes(q) ||
-      p.sourceId.toLowerCase().includes(q)
+      p.sourceId.toLowerCase().includes(q) ||
+      inSummary ||
+      inTags
     )
   })
 }
@@ -59,6 +67,8 @@ export default function App() {
   const [filterCategory, setFilterCategory] = useState('')
   const [pinnedOnly, setPinnedOnly] = useState(false)
   const [selectedId, setSelectedId] = useState<string | null>(null)
+  const [pendingProposals, setPendingProposals] = useState<AIProposal[]>([])
+  const [proposalBusy, setProposalBusy] = useState(false)
 
   const categories = useMemo(() => uniqueCategories(podcasts), [podcasts])
   const filtered = useMemo(
@@ -87,6 +97,19 @@ export default function App() {
     setAudit(logs)
   }, [])
 
+  const refreshPendingProposals = useCallback(async (podcastId: string | null) => {
+    if (!podcastId) {
+      setPendingProposals([])
+      return
+    }
+    try {
+      const list = await fetchSuggestions(podcastId, 'pending')
+      setPendingProposals(list)
+    } catch {
+      setPendingProposals([])
+    }
+  }, [])
+
   useEffect(() => {
     let cancelled = false
     ;(async () => {
@@ -107,6 +130,10 @@ export default function App() {
       cancelled = true
     }
   }, [refreshCatalog, refreshAudit, showToast])
+
+  useEffect(() => {
+    void refreshPendingProposals(selectedId)
+  }, [selectedId, refreshPendingProposals])
 
   useEffect(() => {
     if (view !== 'audit') return
@@ -133,6 +160,77 @@ export default function App() {
       setSyncBusy(false)
     }
   }, [syncBusy, syncQuery, refreshCatalog, refreshAudit, showToast])
+
+  const generateSuggestion = useCallback(async () => {
+    if (!selectedId || proposalBusy) return
+    setProposalBusy(true)
+    try {
+      await createSuggestion(selectedId)
+      await refreshPendingProposals(selectedId)
+      await refreshAudit()
+      showToast('AI suggestion created — review and accept or reject.')
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : String(e)
+      showToast(`Suggestion failed: ${msg}`)
+    } finally {
+      setProposalBusy(false)
+    }
+  }, [
+    selectedId,
+    proposalBusy,
+    refreshPendingProposals,
+    refreshAudit,
+    showToast,
+  ])
+
+  const acceptProposal = useCallback(
+    async (proposalId: string) => {
+      if (proposalBusy) return
+      setProposalBusy(true)
+      try {
+        const updated = await acceptSuggestion(proposalId)
+        setPodcasts((prev) =>
+          prev.map((p) => (p.id === updated.id ? updated : p)),
+        )
+        await refreshPendingProposals(selectedId)
+        await refreshCatalog()
+        await refreshAudit()
+        showToast('Suggestion accepted — catalog updated.')
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        showToast(`Accept failed: ${msg}`)
+      } finally {
+        setProposalBusy(false)
+      }
+    },
+    [
+      proposalBusy,
+      selectedId,
+      refreshPendingProposals,
+      refreshCatalog,
+      refreshAudit,
+      showToast,
+    ],
+  )
+
+  const rejectProposal = useCallback(
+    async (proposalId: string) => {
+      if (proposalBusy) return
+      setProposalBusy(true)
+      try {
+        await rejectSuggestion(proposalId)
+        await refreshPendingProposals(selectedId)
+        await refreshAudit()
+        showToast('Suggestion rejected.')
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        showToast(`Reject failed: ${msg}`)
+      } finally {
+        setProposalBusy(false)
+      }
+    },
+    [proposalBusy, selectedId, refreshPendingProposals, refreshAudit, showToast],
+  )
 
   const togglePin = useCallback(
     async (id: string) => {
@@ -213,6 +311,11 @@ export default function App() {
                 podcast={selected}
                 onPinToggle={(id) => void togglePin(id)}
                 onClose={() => setSelectedId(null)}
+                pendingProposals={pendingProposals}
+                proposalBusy={proposalBusy}
+                onGenerateSuggestion={() => void generateSuggestion()}
+                onAcceptProposal={(id) => void acceptProposal(id)}
+                onRejectProposal={(id) => void rejectProposal(id)}
               />
             </div>
           </section>

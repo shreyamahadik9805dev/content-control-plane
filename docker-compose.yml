@@ -45,6 +45,8 @@ services:
       ITUNES_BASE_URL: https://itunes.apple.com
       # Set false to call Apple’s API from the container (needs outbound network).
       ITUNES_MOCK: "true"
+      # Human-in-the-loop suggestions: no API key when true (deterministic mock).
+      AI_MOCK: "true"
       CACHE_TTL_SECONDS: "30"
       ENV: development
     ports:

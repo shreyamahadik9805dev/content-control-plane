@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"github.com/shreyafeo/content-control-plane/internal/ai"
 	"github.com/shreyafeo/content-control-plane/internal/cache"
 	"github.com/shreyafeo/content-control-plane/internal/client/itunes"
 	"github.com/shreyafeo/content-control-plane/internal/config"
@@ -38,7 +39,9 @@ func main() {
 	ttlCache := cache.New(cfg.CacheTTL, cleanup)
 	itClient := itunes.New(cfg.ITunesBaseURL, cfg.ITunesMock)
 	podcasts := service.NewPodcasts(repo, ttlCache, itClient)
-	h := handler.New(podcasts)
+	sg := ai.FromConfig(cfg)
+	proposals := service.NewProposals(repo, sg, podcasts)
+	h := handler.New(podcasts, proposals)
 
 	r := gin.Default()
 	// Browsers treat the Vite dev server (another port) as a separate origin; only open this up in development.
